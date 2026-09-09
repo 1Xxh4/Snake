@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鬼抓人小游戏</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none; /* 防止双击选中文本 */
+        }
+
+        h1 { margin-bottom: 10px; font-size: 24px; }
+        
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            border: 4px solid #444;
+        }
+
+        canvas {
+            background-color: #333;
+            display: block;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 让点击穿透到 Canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .score-board {
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        #start-screen, #game-over-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.85);
+            padding: 30px;
+            text-align: center;
+            border-radius: 10px;
+            pointer-events: auto; /* 允许点击按钮 */
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            min-width: 200px;
+        }
+
+        .hidden { display: none !important; }
+
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            transition: background 0.2s;
+        }
+
+        button:hover { background-color: #45a049; }
+        
+        .controls-hint {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>👻 鬼抓人 (Tag Game)</h1>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="600" height="400"></canvas>
+        
+        <div id="ui-layer">
+            <div class="score-board">存活时间: <span id="scoreVal">0.0</span>s</div>
+        </div>
+
+        <!-- 开始界面 -->
+        <div id="start-screen">
+            <h2>准备好了吗？</h2>
+            <p>躲避红色的鬼！</p>
+            <button onclick="startGame()">开始游戏</button>
+            <div class="controls-hint">使用 WASD 或 方向键 移动</div>
+        </div>
+
+        <!-- 结束界面 -->
+        <div id="game-over-screen" class="hidden">
+            <h2 style="color: #ff5555;">被抓住了!</h2>
+            <p>最终成绩: <span id="finalScore">0</span>s</p>
+            <button onclick="startGame()">再玩一次</button>
+        </div>
+    </div>
+
+<script>
+    // --- 游戏配置 ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('scoreVal');
+    const finalScoreEl = document.getElementById('finalScore');
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+
+    let animationId;
+    let startTime;
+    let isGameOver = false;
+
+    // 玩家设置
+    const player = {
+        x: 50,
+        y: 50,
+        size: 20,
+        speed: 4,
+        color: '#4CAF50' // 绿色
+    };
+
+    // 鬼的设置
+    const ghost = {
+        x: 500,
+        y: 300,
+        size: 24,
+        baseSpeed: 2.2, // 初始速度
+        currentSpeed: 2.2,
+        color: '#FF5252' // 红色
+    };
+
+    // 按键状态
+    const keys = {
+        ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+        w: false, s: false, a: false, d: false, W: false, S: false, A: false, D: false
+    };
+
+    // --- 事件监听 ---
+    window.addEventListener('keydown', (e) => keys[e.key] = true);
+    window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+    // --- 核心逻辑 ---
+
+    function startGame() {
+        // 重置状态
+        isGameOver = false;
+        startTime = Date.now();
+        
+        // 重置位置 (随机生成鬼的位置，确保离玩家远一点)
+        player.x = canvas.width / 4;
+        player.y = canvas.height / 2;
+        
+        ghost.x = canvas.width * 0.75;
+        ghost.y = canvas.height / 2;
+        ghost.currentSpeed = ghost.baseSpeed;
+
+        // UI 切换
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        
+        if (animationId) cancelAnimationFrame(animationId);
+        gameLoop();
+    }
+
+    function update() {
+        if (isGameOver) return;
+
+        // 1. 计算分数 (时间)
+        const elapsed = (Date.now() - startTime) / 1000;
+        scoreEl.innerText = elapsed.toFixed(1);
+
+        // 难度增加：每过10秒，鬼的速度增加 0.2
+        ghost.currentSpeed = ghost.baseSpeed + Math.floor(elapsed / 10) * 0.2;
+
+        // 2. 玩家移动
+        if (keys.ArrowUp || keys.w || keys.W) player.y -= player.speed;
+        if (keys.ArrowDown || keys.s || keys.S) player.y += player.speed;
+        if (keys.ArrowLeft || keys.a || keys.A) player.x -= player.speed;
+        if (keys.ArrowRight || keys.d || keys.D) player.x += player.speed;
+
+        // 边界限制 (玩家)
+        player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+        player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
+
+        // 3. 鬼的 AI (简单的追踪算法)
+        const dx = player.x - ghost.x;
+        const dy = player.y - ghost.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > 0) {
+            ghost.x += (dx / distance) * ghost.currentSpeed;
+            ghost.y += (dy / distance) * ghost.currentSpeed;
+        }
+
+        // 4. 碰撞检测 (AABB 矩形碰撞)
+        if (
+            player.x < ghost.x + ghost.size &&
+            player.x + player.size > ghost.x &&
+            player.y < ghost.y + ghost.size &&
+            player.y + player.size > ghost.y
+        ) {
+            endGame(elapsed);
+        }
+    }
+
+    function draw() {
+        // 清空画布
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 绘制玩家
+        ctx.fillStyle = player.color;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = player.color;
+        ctx.fillRect(player.x, player.y, player.size, player.size);
+
+        // 绘制鬼
+        ctx.fillStyle = ghost.color;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = ghost.color;
+        ctx.fillRect(ghost.x, ghost.y, ghost.size, ghost.size);
+        
+        // 重置阴影，避免影响性能
+        ctx.shadowBlur = 0;
+    }
+
+    function gameLoop() {
+        if (!isGameOver) {
+            update();
+            draw();
+            animationId = requestAnimationFrame(gameLoop);
+        }
+    }
+
+    function endGame(score) {
+        isGameOver = true;
+        finalScoreEl.innerText = score.toFixed(1);
+        gameOverScreen.classList.remove('hidden');
+    }
+
+</script>
+</body>
+</html>
